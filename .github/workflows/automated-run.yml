@@ -1,0 +1,72 @@
+
+name: Automated Run
+
+# Controls when the action will run. Workflow runs when manually triggered using the UI
+# or API.
+on:
+  workflow_dispatch:
+    # Inputs the workflow accepts.
+    inputs:
+      environment:
+        description: "Environment to run test"
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - 'dev'
+          - 'staging'
+      testrail:
+        description: "Check if run to be logged in TestRail"
+        required: true
+        default: false
+        type: boolean
+      testrail-id:
+        description: "The ID of a previously created run, leave blank to generate run automatically"
+        required: false
+        type: string
+      testrail-title:
+        description: "Name of automatically generated TestRail run (will append current date)"
+        required: false
+        type: string
+        default: "Automated Run"
+      testrail-sections:
+        description: "List of sections to include in generated run separated by comma (e.g.: 101, 102, 103). Leave blank to include all test cases"
+        required: false
+        type: string
+      tags:
+        description: "Tags to include or exclude in run (e.g., @mytag). Can be left blank"
+        required: false
+        type: string
+
+
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, dev]
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+      - name: Decode user logins
+        env:
+          USER_LOGINS: ${{secrets.USER_LOGINS}}
+        run: echo "$USER_LOGINS" > $GITHUB_WORKSPACE/src/test/resources/logins.properties
+      - name: Test with Maven
+        run: >
+          JAVA_HOME=/opt/openjdk 
+          MAVEN_HOME=/opt/apache-maven 
+          PATH=$PATH:$MAVEN_HOME/bin:$JAVA_HOME/bin
+          mvn test "-D cucumber.filter.tags=${{ github.event.inputs.tags }}" -D environment=${{ github.event.inputs.environment }} -D headless=true -D testrail.use=${{ github.event.inputs.testrail }} -D testrail.id=${{ github.event.inputs.testrail-id }} "-D testrail.title=${{ github.event.inputs.testrail-title }}" "-D testrail.sections=${{ github.event.inputs.testrail-sections }}" --file pom.xml
+
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: error-report
+          path: |
+            target
+            !target/test-classes
